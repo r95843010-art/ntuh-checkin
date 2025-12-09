@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>臺大醫院會議簽到系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .animate-spin-slow { animation: spin 3s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 h-screen flex flex-col">
+    <div id="root" class="flex-1 flex flex-col h-full"></div>
+
+    <script type="text/babel" data-type="module">
+        // Firebase Imports (ES Modules via CDN)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, addDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+        // React Globals
+        const { useState, useRef, useEffect, useMemo, useCallback } = React;
+
+        // --- Configuration ---
+       const firebaseConfig = {
+  apiKey: "AIzaSyBj3jB2ygkrfCccGWk8AZGwQgd7ZjdCul0",
+  authDomain: "ntuh-meeting-app2026.firebaseapp.com",
+  projectId: "ntuh-meeting-app2026",
+  storageBucket: "ntuh-meeting-app2026.firebasestorage.app",
+  messagingSenderId: "1068177945920",
+  appId: "1:1068177945920:web:e879a8843c5357ed88f6a5",
+  measurementId: "G-FR3Y2PY4BZ"
+};
+
+        // --- Global Constants ---
+        const defaultNewMeeting = {
+            title: '',
+            date: '', 
+            startTime: '',
+            endTime: '',
+            members: [],
+        };
+
+        // --- Icons (Inline SVGs) ---
+        const Icon = ({ path, className = "", size = 24, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+                {path}
+            </svg>
+        );
+        const Icons = {
+            UserCheck: (props) => <Icon path={<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></>} {...props} />,
+            UserPlus: (props) => <Icon path={<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></>} {...props} />,
+            Users: (props) => <Icon path={<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>} {...props} />,
+            FileSignature: (props) => <Icon path={<><path d="M20 19.5v.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8.5L20 7.5V19.5z"/><path d="M18 7.5H14.5V4"/><path d="M8 18h1"/></>} {...props} />, 
+            Search: (props) => <Icon path={<><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></>} {...props} />,
+            ArrowLeft: (props) => <Icon path={<><line x1="19" x2="5" y1="12" y2="12"/><polyline points="12 19 5 12 12 5"/></>} {...props} />,
+            Save: (props) => <Icon path={<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></>} {...props} />,
+            X: (props) => <Icon path={<><line x1="18" x2="6" y1="6" y2="18"/><line x1="6" x2="18" y1="6" y2="18"/></>} {...props} />,
+            Download: (props) => <Icon path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></>} {...props} />,
+            CheckCircle: (props) => <Icon path={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>} {...props} />,
+            Clock: (props) => <Icon path={<><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>} {...props} />,
+            AlertCircle: (props) => <Icon path={<><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></>} {...props} />,
+            Upload: (props) => <Icon path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></>} {...props} />,
+            FileText: (props) => <Icon path={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></>} {...props} />,
+            Trash2: (props) => <Icon path={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></>} {...props} />,
+            Calendar: (props) => <Icon path={<><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></>} {...props} />,
+            Plus: (props) => <Icon path={<><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></>} {...props} />,
+            ChevronRight: (props) => <Icon path={<><polyline points="9 18 15 12 9 6"/></>} {...props} />,
+            Lock: (props) => <Icon path={<><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>} {...props} />,
+            Shield: (props) => <Icon path={<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></>} {...props} />,
+            LogOut: (props) => <Icon path={<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></>} {...props} />,
+            KeyRound: (props) => <Icon path={<><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5"/></>} {...props} />,
+            Server: (props) => <Icon path={<><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></>} {...props} />,
+            Globe: (props) => <Icon path={<><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></>} {...props} />,
+            Edit: (props) => <Icon path={<><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></>} {...props} />,
+            Monitor: (props) => <Icon path={<><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></>} {...props} />,
+            Unlock: (props) => <Icon path={<><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></>} {...props} />,
+        };
+
+        // --- Helpers ---
+        function parseDateTime(dateStr, timeStr) {
+            if (!dateStr || !timeStr) return new Date(0); 
+            return new Date(`${dateStr}T${timeStr}`);
+        }
+
+        function formatTime(dateObj) {
+            return dateObj.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+
+        function getNextHourTimes() {
+            const now = new Date();
+            const start = new Date(now);
+            start.setMinutes(0, 0, 0);
+            start.setHours(start.getHours() + 1);
+            
+            const end = new Date(start);
+            end.setHours(end.getHours() + 1);
+
+            const fmt = (d) => {
+                const h = String(d.getHours()).padStart(2, '0');
+                const m = String(d.getMinutes()).padStart(2, '0');
+                return `${h}:${m}`;
+            };
+            
+            const y = start.getFullYear();
+            const m = String(start.getMonth() + 1).padStart(2, '0');
+            const d = String(start.getDate()).padStart(2, '0');
+            const dateStr = `${y}-${m}-${d}`;
+
+            return {
+                date: dateStr,
+                startTime: fmt(start),
+                endTime: fmt(end)
+            };
+        }
+
+        function downloadSampleCSV() {
+            const csvContent = "\uFEFF員編,姓名,部門,職稱,手機\n100001,王大明,內科部,主治醫師,0912-345-678\n100002,李小美,護理部,護理師,0988-111-222";
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const tempUrl = URL.createObjectURL(blob);
+            link.href = tempUrl;
+            link.download = "成員名單匯入範例.csv";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(tempUrl);
+        }
+
+        // --- Components ---
+
+        function ConfirmationModal({ isOpen, onClose, onConfirm, message, title, confirmText, cancelText, intent = 'confirm' }) {
+            if (!isOpen) return null;
+            
+            const isDelete = intent === 'delete';
+            const color = isDelete ? 'red' : intent === 'alert' ? 'blue' : 'amber';
+            const IconComp = isDelete ? Icons.Trash2 : intent === 'alert' ? Icons.AlertCircle : Icons.CheckCircle;
+            const isAlertMode = intent === 'alert';
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden m-4">
+                        <div className={`bg-${color}-600 p-4 text-white flex justify-between items-center`}>
+                            <h3 className="font-bold text-lg flex items-center gap-2">
+                                <IconComp size={18}/> {title || '通知'}
+                            </h3>
+                            <button onClick={onClose} className={`text-${color}-200 hover:text-white`}><Icons.X size={20}/></button>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-gray-700 mb-6 whitespace-pre-line text-sm leading-relaxed">{message}</p>
+                            <div className="flex justify-end gap-3">
+                                {!isAlertMode && (
+                                    <button onClick={onClose} className="px-4 py-2 text-gray-600 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium text-sm w-full sm:w-auto">
+                                        {cancelText || '取消'}
+                                    </button>
+                                )}
+                                <button 
+                                    onClick={onConfirm || onClose}
+                                    className={`px-4 py-2 bg-${color}-600 hover:bg-${color}-700 text-white rounded-lg font-bold transition-colors flex items-center justify-center gap-2 text-sm w-full sm:w-auto`}
+                                >
+                                    {isAlertMode ? '確定' : (isDelete ? <Icons.Trash2 size={16}/> : <Icons.CheckCircle size={16}/>)} 
+                                    {confirmText || '確認'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function AdminLoginModal({ isOpen, onClose, onLoginSuccess }) {
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            useEffect(() => {
+                if (isOpen) {
+                    setPassword('');
+                    setError('');
+                }
+            }, [isOpen]);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (password === '0000') {
+                    onLoginSuccess();
+                    onClose();
+                } else {
+                    setError('密碼錯誤');
+                }
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-xs overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="bg-slate-800 p-4 text-white flex justify-between items-center">
+                            <h3 className="font-bold text-lg flex items-center gap-2"><Icons.Shield size={18}/> 管理員驗證</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-white"><Icons.X size={20}/></button>
+                        </div>
+                        <form onSubmit={handleSubmit} className="p-6">
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-gray-600 mb-2">請輸入管理密碼</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"><Icons.KeyRound size={18} /></span>
+                                    <input 
+                                        type="password" 
+                                        autoFocus
+                                        className="w-full pl-10 p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="請輸入密碼"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                    />
+                                </div>
+                                {error && <p className="text-red-500 text-sm mt-2 flex items-center gap-1"><Icons.AlertCircle size={12}/> {error}</p>}
+                            </div>
+                            <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white py-2 rounded-lg font-bold transition-colors">
+                                確認登入
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        function SignaturePad({ onSave, onCancel, headerMessage, meetingTitle }) {
+            const canvasRef = useRef(null);
+            const [isDrawing, setIsDrawing] = useState(false);
+            const [hasSignature, setHasSignature] = useState(false);
+            const [message, setMessage] = useState('');
+            const [timestamp] = useState(new Date());
+
+            const drawBackground = useCallback((ctx, width, height) => {
+                // 1. Fill White Background
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, width, height);
+
+                // 2. Draw Dense Text Pattern (Watermark)
+                ctx.save();
+                ctx.font = "12px 'Noto Sans TC', sans-serif";
+                ctx.fillStyle = "rgba(180, 195, 210, 0.25)"; 
+                ctx.textBaseline = "middle";
+                
+                const year = timestamp.getFullYear();
+                const month = String(timestamp.getMonth() + 1).padStart(2, '0');
+                const day = String(timestamp.getDate()).padStart(2, '0');
+                const hour = String(timestamp.getHours()).padStart(2, '0');
+                const minute = String(timestamp.getMinutes()).padStart(2, '0');
+                const timeStr = `${year}年${month}月${day}日${hour}時${minute}分`;
+
+                const titleText = meetingTitle || '';
+                // 緊密連接的字串，沒有空格
+                const watermarkText = `臺大醫院會議簽到管理系統${titleText}${timeStr}`;
+                const textWidth = ctx.measureText(watermarkText).width + 20; // Add small buffer for loop
+
+                const diag = Math.ceil(Math.sqrt(width * width + height * height));
+                const stepY = 22;  // Dense vertical step (approx 0.5 line height visual)
+
+                // Translate to center, rotate, translate back to cover area
+                ctx.translate(width / 2, height / 2);
+                ctx.rotate(-45 * Math.PI / 180);
+                const startX = -diag;
+                const startY = -diag;
+
+                // Fill the rotated rectangle area
+                for (let y = startY; y < diag; y += stepY) {
+                    const offsetX = (y / stepY) % 2 === 0 ? 0 : textWidth / 2;
+                    for (let x = startX; x < diag; x += textWidth) {
+                        ctx.fillText(watermarkText, x + offsetX, y);
+                    }
+                }
+                ctx.restore();
+
+                // 3. Signature Line Style (Layer 3 - Top for drawing)
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)'; // Black, 50% opacity
+            }, [timestamp, meetingTitle]);
+
+            // Ensure setCanvasSize is called correctly on initial mount and resize
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                
+                const setCanvasSize = () => {
+                    const parent = canvas.parentElement;
+                    if (!parent) return;
+                    canvas.width = parent.clientWidth;
+                    canvas.height = parent.clientHeight;
+                    
+                    drawBackground(ctx, canvas.width, canvas.height);
+                    if (hasSignature) setHasSignature(false);
+                };
+
+                setCanvasSize();
+                const timer = setTimeout(setCanvasSize, 100);
+
+                window.addEventListener('resize', setCanvasSize);
+                return () => {
+                    window.removeEventListener('resize', setCanvasSize);
+                    clearTimeout(timer);
+                };
+            }, [drawBackground]);
+
+            const getPos = (e) => {
+                const canvas = canvasRef.current;
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
+                return { x: clientX - rect.left, y: clientY - rect.top };
+            };
+
+            const startDrawing = (e) => {
+                if (e.cancelable) e.preventDefault(); 
+                setIsDrawing(true);
+                setHasSignature(true);
+                setMessage('');
+                const ctx = canvasRef.current.getContext('2d');
+                const { x, y } = getPos(e);
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            };
+
+            const draw = (e) => {
+                if (e.cancelable) e.preventDefault();
+                if (!isDrawing) return;
+                const ctx = canvasRef.current.getContext('2d');
+                const { x, y } = getPos(e);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            };
+
+            const stopDrawing = () => setIsDrawing(false);
+            
+            const clearCanvas = () => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                drawBackground(ctx, canvas.width, canvas.height);
+                setHasSignature(false);
+                setMessage('');
+            };
+
+            const handleSave = () => {
+                if (!hasSignature) {
+                    setMessage("請先進行簽名");
+                    return;
+                }
+                const canvas = canvasRef.current;
+                onSave(canvas.toDataURL('image/png'));
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden h-[90vh] md:h-auto">
+                        <div className="p-4 border-b flex justify-between items-center bg-gray-50 shrink-0">
+                            <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2 truncate">
+                                <Icons.FileSignature className="w-5 h-5 text-blue-600 shrink-0" /> 
+                                <span className="truncate">{headerMessage || "請在下方區域簽名"}</span>
+                            </h3>
+                            <button onClick={onCancel} className="text-gray-500 hover:text-red-500 shrink-0"><Icons.X size={24} /></button>
+                        </div>
+                        <div className="flex-1 bg-gray-100 p-4 relative touch-none min-h-0">
+                           <canvas ref={canvasRef} className="w-full h-full bg-white rounded-lg border border-gray-300 shadow-inner cursor-crosshair touch-none"
+                            onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
+                            onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing} />
+                          {!hasSignature && <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30 select-none"><span className="text-2xl text-gray-400 font-bold">在此簽名</span></div>}
+                        </div>
+                        {message && <div className="bg-red-100 text-red-600 p-2 text-center text-sm font-medium flex items-center justify-center gap-2 shrink-0"><Icons.AlertCircle size={14} /> {message}</div>}
+                        <div className="p-4 border-t flex justify-between gap-3 bg-white shrink-0">
+                            <button onClick={clearCanvas} className="px-4 py-3 text-gray-600 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium flex-1">清除</button>
+                            <div className="flex gap-3 flex-[2]">
+                                <button onClick={onCancel} className="px-4 py-3 text-gray-600 border border-gray-300 hover:bg-gray-50 rounded-lg font-medium w-full">取消</button>
+                                <button onClick={handleSave} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-md flex items-center justify-center gap-2 w-full"><Icons.Save size={16} /> 簽到</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- MeetingRoom (Main Detail Component) ---
+        function MeetingRoom({ meeting, onUpdateMeeting, onBack, isAdmin, onAdminAuth, db }) {
+            const [view, setView] = useState('home');
+            const [searchQuery, setSearchQuery] = useState('');
+            const [selectedMember, setSelectedMember] = useState(null);
+            const [proxyName, setProxyName] = useState('');
+            const [showSignaturePad, setShowSignaturePad] = useState(false);
+            const [signatureHeaderMessage, setSignatureHeaderMessage] = useState('');
+            const [tempMemberForm, setTempMemberForm] = useState({ name: '', department: '', title: '', phone: '' });
+            const [isKioskMode, setIsKioskMode] = useState(false);
+            const fileInputRef = useRef(null);
+            
+            const [showRoomConfirmation, setShowRoomConfirmation] = useState(false);
+            const [showKioskExitModal, setShowKioskExitModal] = useState(false);
+            const [roomConfirmationDetails, setRoomConfirmationDetails] = useState({});
+
+            const getMeetingTimeState = () => {
+                const now = new Date();
+                const start = parseDateTime(meeting.date, meeting.startTime);
+                const end = parseDateTime(meeting.date, meeting.endTime);
+                const checkInStart = new Date(start.getTime() - 30 * 60000);
+                const checkInEnd = new Date(end.getTime() + 10 * 60000);
+
+                if (now < checkInStart) return 'before';
+                if (now > checkInEnd) return 'after';
+                return 'open';
+            };
+
+            const timeState = getMeetingTimeState();
+            const isInputView = view === 'checkin' || view === 'proxy';
+
+            const showAlert = useCallback((message) => {
+                setRoomConfirmationDetails({
+                    title: '通知',
+                    message: message,
+                    onConfirm: () => setShowRoomConfirmation(false),
+                    onClose: () => setShowRoomConfirmation(false),
+                    intent: 'alert',
+                });
+                setShowRoomConfirmation(true);
+            }, []);
+
+            const showConfirm = useCallback((message, onConfirmCallback) => {
+                setRoomConfirmationDetails({
+                    title: '確認操作',
+                    message: message,
+                    onConfirm: () => {
+                        setShowRoomConfirmation(false);
+                        onConfirmCallback();
+                    },
+                    onClose: () => setShowRoomConfirmation(false),
+                    intent: 'confirm',
+                });
+                setShowRoomConfirmation(true);
+            }, []);
+
+            const checkTimeStatus = useCallback(() => {
+                const now = new Date();
+                const start = parseDateTime(meeting.date, meeting.startTime);
+                const end = parseDateTime(meeting.date, meeting.endTime);
+                
+                const checkInStart = new Date(start.getTime() - 30 * 60000); 
+                const checkInEnd = new Date(end.getTime() + 10 * 60000);     
+                
+                const isOpen = now >= checkInStart && now <= checkInEnd;
+                const checkInStartStr = checkInStart.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+                
+                return { isOpen, now, checkInStartStr };
+            }, [meeting.date, meeting.startTime, meeting.endTime]);
+
+            const stats = useMemo(() => ({
+                total: meeting?.members?.length || 0,
+                present: (meeting?.members?.filter(m => m.status === 'present')?.length || 0),
+                proxy: (meeting?.members?.filter(m => m.status === 'proxy')?.length || 0),
+                pending: (meeting?.members?.filter(m => m.status === 'pending')?.length || 0),
+                temp: (meeting?.members?.filter(m => m.isTemp)?.length || 0),
+            }), [meeting.members]);
+
+            const validateCheckInAccess = useCallback(() => {
+                const { isOpen, checkInStartStr } = checkTimeStatus();
+                if (!isOpen && !isAdmin) {
+                    showAlert(`目前不在開放簽到時間內。\n(規則：會議時間前 30 分鐘 (${checkInStartStr}) 開放簽到，會議結束後 10 分鐘關閉簽到)`);
+                    return false;
+                }
+                return true;
+            }, [isAdmin, checkTimeStatus, showAlert]);
+
+            const updateMembers = (newMembers) => {
+                onUpdateMeeting({ ...meeting, members: newMembers });
+            };
+
+            const handleImportCSV = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                
+                if (file.size > 5 * 1024 * 1024) {
+                    showAlert("檔案大小超過 5MB 限制，請縮減名單後再上傳。");
+                    event.target.value = '';
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const result = e.target.result;
+                    const cleanResult = result.startsWith('\uFEFF') ? result.substring(1) : result;
+                    const lines = cleanResult.split('\n');
+                    const newMembers = [];
+                    lines.forEach((line, index) => {
+                        const cleanLine = line.trim();
+                        if (!cleanLine || (index === 0 && (cleanLine.includes('姓名') || cleanLine.includes('Name')))) return;
+                        
+                        const parts = cleanLine.match(/(?:[^,"]+|"[^"]*")+/g);
+                        if (!parts || parts.length < 4) return;
+                        
+                        const id = parts[0].trim().replace(/"/g, '');
+                        const name = parts[1].trim().replace(/"/g, '');
+                        
+                        if (!id || !name) return; 
+
+                        newMembers.push({
+                            id: id,
+                            name: name,
+                            department: parts[2] ? parts[2].trim().replace(/"/g, '') : '未分派',
+                            title: parts[3] ? parts[3].trim().replace(/"/g, '') : '無職稱', 
+                            phone: parts[4] ? parts[4].trim().replace(/"/g, '') : '',       
+                            status: 'pending',
+                            signature: null,
+                            proxyBy: null,
+                            isTemp: false,
+                        });
+                    });
+                    
+                    if (newMembers.length === 0) {
+                        showAlert("匯入失敗：未從檔案中找到有效的成員資料。請確認檔案編碼為 UTF-8。");
+                        event.target.value = '';
+                        return;
+                    }
+                    
+                    showConfirm(`匯入 ${newMembers.length} 筆資料？\n\n【警告】將保留已簽到紀錄，並新增名單。`, () => {
+                         const signedMembers = meeting.members.filter(m => m.status !== 'pending' && !m.isTemp);
+                         const tempMembers = meeting.members.filter(m => m.isTemp);
+                         const merged = [...signedMembers];
+                         const maxOrder = meeting.members.reduce((max, m) => Math.max(max, m.order || 0), 0);
+                         let nextOrderIndex = maxOrder + 1; 
+
+                         newMembers.forEach((nm) => {
+                            const existingSigned = signedMembers.find(m => m.id === nm.id);
+                            if (existingSigned) {
+                                const existingIndex = merged.findIndex(m => m.id === nm.id);
+                                if (existingIndex !== -1) merged[existingIndex] = { ...nm, ...existingSigned }; 
+                            } else {
+                                if (!merged.some(m => m.id === nm.id)) merged.push({...nm, order: nextOrderIndex++});
+                            }
+                         });
+                         
+                         merged.push(...tempMembers);
+                         updateMembers(merged.sort((a, b) => (a.order || 999999) - (b.order || 999999)));
+                         showAlert('名單匯入完成');
+                    });
+                };
+                reader.readAsText(file); 
+                event.target.value = '';
+            };
+
+            const handleSignatureSave = (signatureData) => {
+                const newMembers = meeting.members.map(m => {
+                    if (m.id === selectedMember.id) {
+                        return {
+                            ...m,
+                            status: proxyName ? 'proxy' : 'present',
+                            signature: signatureData,
+                            proxyBy: proxyName || null,
+                            checkInTime: formatTime(new Date()),
+                        };
+                    }
+                    return m;
+                });
+                updateMembers(newMembers);
+                setShowSignaturePad(false);
+                setSelectedMember(null);
+                setProxyName('');
+                setView('home');
+                showAlert("簽到成功！");
+            };
+
+            const handleAddTempMember = () => {
+                if (!validateCheckInAccess()) return;
+                if (!tempMemberForm.name || !tempMemberForm.department) { showAlert("請填寫完整資訊"); return; }
+                const newId = `T-${Date.now().toString().slice(-6)}`;
+                const newMember = {
+                    id: newId, name: tempMemberForm.name, department: tempMemberForm.department,
+                    title: tempMemberForm.title || '臨時人員', phone: tempMemberForm.phone,
+                    status: 'pending', signature: null, proxyBy: null, isTemp: true,
+                    order: Date.now()
+                };
+                const updatedMembers = [...meeting.members, newMember];
+                updateMembers(updatedMembers);
+                setSelectedMember(newMember); 
+                setSignatureHeaderMessage(`您好，${newMember.name} (臨時人員)`);
+                setShowSignaturePad(true);
+                setTempMemberForm({ name: '', department: '', title: '', phone: '' });
+            };
+
+            const handleSearchCheckIn = () => {
+                if (!validateCheckInAccess()) return;
+                const query = searchQuery.trim();
+                if (!query) return;
+                const target = meeting.members.find(m => m.id === query || m.name === query);
+                setSearchQuery('');
+                if (target) {
+                    if (target.status === 'pending') {
+                        setSelectedMember(target);
+                        setSignatureHeaderMessage(`您好，${target.name} (${target.id})`);
+                        setShowSignaturePad(true);
+                    } else {
+                        showAlert(`${target.name} 已經簽到過了。`);
+                    }
+                } else {
+                    showAlert("請確認輸入姓名/員編是否正確或改以代理/臨時身分出席");
+                }
+            };
+
+            const handleExportReport = () => {
+                const htmlContent = `<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>${meeting.title} - 臺大醫院簽到表</title><style>body{font-family:"Microsoft JhengHei",sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:8px;text-align:center}.sig-img{height:40px}</style></head><body><h1>${meeting.title}</h1><table><thead><tr><th>狀態</th><th>員編</th><th>姓名</th><th>部門</th><th>職稱</th><th>簽到時間</th><th>簽名</th></tr></thead><tbody>${meeting.members.map(m=>`<tr><td>${m.status==='present'?'已到':m.status==='proxy'?'代理':'未到'}</td><td>${m.id}</td><td>${m.name}</td><td>${m.department}</td><td>${m.title||'-'}</td><td>${m.checkInTime||'-'}</td><td>${m.signature?`<img src="${m.signature}" class="sig-img"/>`:''}</td></tr>`).join('')}</tbody></table></body></html>`;
+                const blob = new Blob([htmlContent], { type: 'text/html' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `臺大醫院_${meeting.title}_簽到表.html`;
+                link.click();
+                setTimeout(() => showAlert(`匯出成功！\n【注意】紀錄將於會議結束 6 小時後自動刪除，請妥善保存。`), 500);
+            };
+
+            // Kiosk Mode Controls
+            const toggleKioskMode = () => {
+                if (isKioskMode) {
+                    // To exit, show login modal
+                    setShowKioskExitModal(true);
+                } else {
+                    // To enter, just set true
+                    setIsKioskMode(true);
+                }
+            };
+
+            const handleKioskExitSuccess = () => {
+                setIsKioskMode(false);
+                setShowKioskExitModal(false);
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-50 flex flex-col">
+                    {/* Header Logic: ... same as before */}
+                    {!isKioskMode ? (
+                        <header className="bg-white shadow-sm border-b py-3 px-4 md:py-4 md:px-6 flex justify-between items-center sticky top-0 z-10 shrink-0">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <button onClick={onBack} className="text-gray-500 hover:text-blue-600 flex items-center gap-1 font-medium mr-2 shrink-0"><Icons.ArrowLeft size={20}/> <span className="hidden sm:inline">列表</span></button>
+                                <div className="h-8 w-px bg-gray-300 mr-2 md:mr-4 shrink-0"></div>
+                                <div className="min-w-0 flex-1">
+                                    {/* Mobile: Hide System Name in Input View to save space */}
+                                    <h1 className={`text-xl font-bold text-slate-800 truncate ${isInputView ? 'hidden md:block' : ''}`}>臺大醫院會議簽到管理系統</h1>
+                                    <div className={isInputView ? 'block' : 'text-sm text-slate-600 font-medium'}>
+                                        <p className={`${isInputView ? 'text-lg font-bold text-slate-800 leading-tight truncate' : 'truncate'}`}>{meeting.title}</p>
+                                        {/* Mobile Input View: Show date/time under title */}
+                                        {isInputView && <p className="text-xs text-gray-500 md:hidden flex items-center gap-1 mt-0.5"><Icons.Clock size={12}/> {meeting.date} {meeting.startTime}-{meeting.endTime}</p>}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                                {isAdmin && (
+                                    <>
+                                        <button onClick={toggleKioskMode} className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1 rounded text-xs font-bold border border-slate-300 transition-colors" title="進入現場簽到模式">
+                                            <Icons.Monitor size={14}/> <span className="hidden sm:inline">現場模式</span>
+                                        </button>
+                                        <div className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold border border-red-200 flex items-center gap-1"><Icons.Shield size={12}/> <span className="hidden sm:inline">管理員</span></div>
+                                    </>
+                                )}
+                            </div>
+                        </header>
+                    ) : (
+                        // Simplified Kiosk Header
+                        <header className="bg-blue-900 text-white shadow-md py-4 px-6 flex justify-between items-center sticky top-0 z-10 shrink-0">
+                             <div className="min-w-0">
+                                <h1 className="text-xl md:text-3xl font-bold tracking-wide mb-1 truncate">{meeting.title}</h1>
+                                <p className="text-blue-200 flex items-center gap-2 text-sm md:text-lg"><Icons.Calendar size={16}/> {meeting.date} {meeting.startTime}-{meeting.endTime}</p>
+                            </div>
+                            <button onClick={toggleKioskMode} className="opacity-30 hover:opacity-100 transition-opacity text-white p-2 rounded-full shrink-0">
+                                <Icons.Unlock size={24}/>
+                            </button>
+                        </header>
+                    )}
+
+                    <main className="max-w-5xl mx-auto w-full p-4 flex-1 flex flex-col">
+                        {view === 'home' && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mt-2 md:mt-6">
+                                <div 
+                                    onClick={() => { if(validateCheckInAccess()) setView('checkin'); }} 
+                                    className="bg-gradient-to-br from-blue-800 to-blue-900 rounded-2xl p-8 text-white shadow-lg cursor-pointer hover:scale-105 transition-all flex flex-col items-center justify-center h-48 md:h-64 relative overflow-hidden group active:scale-95"
+                                >
+                                    <Icons.UserCheck className="w-16 h-16 md:w-20 md:h-20 mb-4 opacity-90" />
+                                    <h2 className="text-2xl md:text-3xl font-bold mb-2">本人簽到</h2>
+                                    {timeState !== 'open' && !isAdmin && (
+                                        <div className="absolute inset-0 bg-slate-900/85 flex flex-col items-center justify-center backdrop-blur-sm text-white z-20 cursor-not-allowed text-center p-4">
+                                            <Icons.Lock size={32} className="mb-2 opacity-80"/>
+                                            <span className="font-bold text-xl">{timeState === 'before' ? '未開放簽到' : '簽到已結束'}</span>
+                                            {/* [UPDATED] Show specific time in overlay */}
+                                            <span className="text-sm text-slate-300 mt-1">{timeState === 'before' ? `會議前30分鐘 (${checkInStartStr}) 開放` : '會議結束10分鐘後關閉'}</span>
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                <div 
+                                    onClick={() => { if(validateCheckInAccess()) setView('proxy'); }} 
+                                    className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-2xl p-8 text-white shadow-lg cursor-pointer hover:scale-105 transition-all flex flex-col items-center justify-center h-48 md:h-64 relative overflow-hidden group active:scale-95"
+                                >
+                                    <Icons.UserPlus className="w-16 h-16 md:w-20 md:h-20 mb-4 opacity-90" />
+                                    <h2 className="text-2xl md:text-3xl font-bold mb-2">代理 / 臨時</h2>
+                                    {timeState !== 'open' && !isAdmin && (
+                                        <div className="absolute inset-0 bg-slate-900/85 flex flex-col items-center justify-center backdrop-blur-sm text-white z-20 cursor-not-allowed text-center p-4">
+                                            <Icons.Lock size={32} className="mb-2 opacity-80"/>
+                                            <span className="font-bold text-xl">{timeState === 'before' ? '未開放簽到' : '簽到已結束'}</span>
+                                            {/* [UPDATED] Show specific time in overlay */}
+                                            <span className="text-sm text-slate-300 mt-1">{timeState === 'before' ? `會議前30分鐘 (${checkInStartStr}) 開放` : '會議結束10分鐘後關閉'}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div onClick={() => setView('stats')} className="bg-white border-2 border-gray-100 rounded-2xl p-8 text-gray-700 shadow-lg cursor-pointer hover:scale-105 transition-all flex flex-col items-center justify-center h-48 md:h-64 group hover:border-blue-800 active:scale-95">
+                                    <Icons.Users className="w-16 h-16 md:w-20 md:h-20 mb-4 text-gray-400 group-hover:text-blue-800 transition-colors" />
+                                    <h2 className="text-2xl md:text-3xl font-bold mb-2 group-hover:text-blue-900">名單與匯出</h2>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === 'checkin' && (
+                            <div className="w-full max-w-md mx-auto flex-1 flex flex-col justify-start md:justify-center md:pt-10">
+                                {/* Mobile Optimized Container: Full width, no rounded corners on mobile, top aligned */}
+                                <div className="bg-white w-full md:rounded-2xl shadow-none md:shadow-xl p-4 md:p-8 border-t-0 md:border-t-4 border-blue-800 flex flex-col gap-4">
+                                    <h2 className="text-2xl font-bold text-center mb-2 text-blue-900 hidden md:block">本人簽到</h2>
+                                    
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-600 mb-1 md:hidden">請輸入員編或姓名</label>
+                                            <input 
+                                                type="text" 
+                                                value={searchQuery} 
+                                                onChange={(e) => setSearchQuery(e.target.value)} 
+                                                onKeyDown={(e) => { if (e.key === 'Enter') handleSearchCheckIn(); }} 
+                                                className="w-full p-4 bg-gray-50 border border-gray-300 rounded-xl text-xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 focus:outline-none transition-all" 
+                                                placeholder="輸入員編或姓名" 
+                                                autoFocus 
+                                            />
+                                        </div>
+                                        
+                                        <button 
+                                            onClick={handleSearchCheckIn} 
+                                            disabled={!searchQuery} 
+                                            className="w-full py-4 bg-blue-800 hover:bg-blue-900 text-white text-xl rounded-xl font-bold shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                        >
+                                            <Icons.Search size={24}/> 核對並簽名
+                                        </button>
+                                        
+                                        <button 
+                                            onClick={() => setView('home')} 
+                                            className="w-full py-4 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-xl font-medium transition-colors"
+                                        >
+                                            返回
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === 'proxy' && (
+                            <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col justify-start md:justify-center md:pt-10">
+                                <div className="bg-white w-full md:rounded-2xl shadow-none md:shadow-lg p-4 md:p-6 border-l-0 md:border-l-4 border-amber-500 flex flex-col gap-4">
+                                    <h3 className="text-xl font-bold mb-2 flex items-center gap-2 hidden md:flex"><Icons.UserCheck className="text-amber-600"/> 代理簽到</h3>
+                                    
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-600 mb-1 md:hidden">選擇未出席成員</label>
+                                            <select 
+                                                className="w-full p-4 bg-gray-50 border border-gray-300 rounded-xl text-lg focus:ring-4 focus:ring-amber-100 focus:border-amber-500 focus:outline-none appearance-none" 
+                                                onChange={(e) => {
+                                                    const member = meeting.members.find(m => m.id === e.target.value);
+                                                    setSelectedMember(member);
+                                                    setProxyName('');
+                                                }} 
+                                                value={selectedMember?.id || ''}
+                                            >
+                                                <option value="">-- 點擊選擇成員 --</option>
+                                                {meeting.members.filter(m => m.status === 'pending' && !m.isTemp).map(m => <option key={m.id} value={m.id}>{m.name} ({m.department})</option>)}
+                                            </select>
+                                        </div>
+
+                                        {selectedMember && !selectedMember.isTemp && (
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-600 mb-1 md:hidden">代理人姓名</label>
+                                                <input 
+                                                    type="text" 
+                                                    value={proxyName} 
+                                                    onChange={(e) => setProxyName(e.target.value)} 
+                                                    className="w-full p-4 bg-gray-50 border border-gray-300 rounded-xl text-lg focus:ring-4 focus:ring-amber-100 focus:border-amber-500 focus:outline-none" 
+                                                    placeholder="請輸入代理人姓名" 
+                                                />
+                                            </div>
+                                        )}
+                                        
+                                        <button 
+                                            onClick={() => {
+                                                if(!selectedMember) return showAlert("請選擇成員");
+                                                setSignatureHeaderMessage(selectedMember.isTemp ? `您好，${selectedMember.name}` : `您好，${proxyName} (代 ${selectedMember.name})`);
+                                                setShowSignaturePad(true);
+                                            }} 
+                                            className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white text-xl rounded-xl font-bold shadow-md transition-all active:scale-[0.98]"
+                                        >
+                                            進入簽名
+                                        </button>
+                                        
+                                        <button 
+                                            onClick={() => setView('home')} 
+                                            className="w-full py-4 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-xl font-medium transition-colors"
+                                        >
+                                            返回
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Stats View */}
+                        {view === 'stats' && (
+                            <div className="mt-2 md:mt-6">
+                                <div className="flex justify-between items-center mb-4 md:mb-6">
+                                    <button onClick={() => setView('home')} className="flex items-center text-gray-600 hover:text-blue-800"><Icons.ArrowLeft className="mr-2"/> 返回</button>
+                                    <h2 className="text-2xl font-bold text-blue-900 hidden sm:block">名單與狀態</h2>
+                                    <div className="flex gap-2">
+                                        <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportCSV} className="hidden" />
+                                        <button onClick={() => isAdmin ? fileInputRef.current.click() : onAdminAuth(() => fileInputRef.current.click())} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-gray-200 text-gray-700 text-sm sm:text-base"><Icons.Upload size={16}/> <span className="hidden sm:inline">補匯入</span></button>
+                                        <button onClick={() => isAdmin ? handleExportReport() : onAdminAuth(handleExportReport)} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-800 text-white text-sm sm:text-base"><Icons.FileText size={16}/> <span className="hidden sm:inline">匯出</span></button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2 md:gap-4 mb-4 md:mb-6">
+                                   <div className="bg-green-50 p-2 md:p-4 rounded-xl text-center"><div className="text-green-600 text-xs md:text-sm font-bold">已出席</div><div className="text-lg md:text-2xl font-bold text-green-800">{stats.present}</div></div>
+                                   <div className="bg-amber-50 p-2 md:p-4 rounded-xl text-center"><div className="text-amber-600 text-xs md:text-sm font-bold">代理</div><div className="text-lg md:text-2xl font-bold text-amber-800">{stats.proxy}</div></div>
+                                   <div className="bg-blue-50 p-2 md:p-4 rounded-xl text-center"><div className="text-blue-600 text-xs md:text-sm font-bold">臨時</div><div className="text-lg md:text-2xl font-bold text-blue-800">{stats.temp}</div></div>
+                                   <div className="bg-gray-50 p-2 md:p-4 rounded-xl text-center"><div className="text-gray-500 text-xs md:text-sm font-bold">未到</div><div className="text-lg md:text-2xl font-bold text-gray-600">{stats.pending}</div></div>
+                                </div>
+
+                                <div className="bg-white rounded-xl shadow-sm overflow-hidden border">
+                                    <div className="overflow-x-auto scrollbar-hide">
+                                        <table className="w-full min-w-[600px]">
+                                            <thead className="bg-gray-50 text-gray-600 text-sm">
+                                                <tr>
+                                                    <th className="p-3 text-left w-24">姓名</th>
+                                                    <th className="p-3 text-left">部門</th>
+                                                    <th className="p-3 text-left">職稱</th>
+                                                    <th className="p-3 text-left w-32">電話</th>
+                                                    <th className="p-3 text-center w-20">狀態</th>
+                                                    <th className="p-3 text-center w-24">時間</th>
+                                                    <th className="p-3 text-center w-24">簽名</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>{meeting.members.map(m => (
+                                                <tr key={m.id} className="border-t hover:bg-gray-50">
+                                                    <td className="p-3">
+                                                        <div className="font-medium text-gray-900">{m.name}</div>
+                                                        {m.proxyBy && <div className="text-xs text-amber-600 whitespace-nowrap">代: {m.proxyBy}</div>}
+                                                    </td>
+                                                    <td className="p-3 text-gray-600">{m.department}</td>
+                                                    <td className="p-3 text-gray-600">{m.title || '-'}</td>
+                                                    <td className="p-3 text-gray-600 text-sm">{m.phone || '-'}</td>
+                                                    <td className="p-3 text-center">
+                                                        <span className={`px-2 py-1 rounded-full text-xs font-bold block w-full ${
+                                                            m.status === 'present' ? 'bg-green-100 text-green-800' :
+                                                            m.status === 'proxy' ? 'bg-amber-100 text-amber-800' :
+                                                            m.isTemp ? 'bg-blue-100 text-blue-800' :
+                                                            'bg-gray-100 text-gray-500'
+                                                        }`}>
+                                                            {m.status === 'present' ? '已到' : m.status === 'proxy' ? '代理' : m.isTemp ? '臨時' : '未到'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3 text-center text-sm font-mono text-gray-600">{m.checkInTime || '-'}</td>
+                                                    <td className="p-3 text-center">
+                                                        {m.signature ? (
+                                                            <img src={m.signature} alt="簽名" className="h-8 border border-gray-200 bg-white rounded mx-auto" />
+                                                        ) : (
+                                                            <span className="text-gray-300">-</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}</tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {showSignaturePad && selectedMember && (
+                            <SignaturePad 
+                                onSave={handleSignatureSave} 
+                                onCancel={() => { setShowSignaturePad(false); setSelectedMember(null); }}
+                                headerMessage={signatureHeaderMessage}
+                                meetingTitle={meeting.title} // Ensure title is passed for watermark
+                            />
+                        )}
+                        
+                        {/* Admin Login Modal specifically for Kiosk Exit */}
+                        <AdminLoginModal isOpen={showKioskExitModal} onClose={() => setShowKioskExitModal(false)} onLoginSuccess={handleKioskExitSuccess} />
+                        
+                        <ConfirmationModal 
+                            isOpen={showRoomConfirmation}
+                            onClose={() => setShowRoomConfirmation(false)}
+                            onConfirm={roomConfirmationDetails.onConfirm}
+                            message={roomConfirmationDetails.message}
+                            title={roomConfirmationDetails.title}
+                            intent={roomConfirmationDetails.intent}
+                        />
+                    </main>
+                </div>
+            );
+        }
+
+        // --- App Component (Top Level) ---
+        // ... (App component remains largely the same, no changes needed for this prompt)
+        function App() {
+            const [db, setDb] = useState(null);
+            const [authInstance, setAuthInstance] = useState(null);
+            const [meetings, setMeetings] = useState([]);
+            const [selectedMeetingId, setSelectedMeetingId] = useState(null); // Changed to ID
+            const [userId, setUserId] = useState(null);
+            const [isAuthReady, setIsAuthReady] = useState(false);
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [showCreateModal, setShowCreateModal] = useState(false);
+            const [modalMode, setModalMode] = useState('create');
+            const [editingId, setEditingId] = useState(null);
+            const [meetingForm, setMeetingForm] = useState(defaultNewMeeting);
+            const [showAdminLogin, setShowAdminLogin] = useState(false);
+            const [pendingAdminAction, setPendingAdminAction] = useState(null);
+            const [showConfirmation, setShowConfirmation] = useState(false);
+            const [confirmationDetails, setConfirmationDetails] = useState({});
+            const createFileInputRef = useRef(null);
+
+            // Derived state
+            const selectedMeeting = useMemo(() => 
+                meetings.find(m => m.id === selectedMeetingId) || null
+            , [meetings, selectedMeetingId]);
+
+            const showAlert = useCallback((message) => {
+                setConfirmationDetails({ title: '通知', message, onConfirm: () => setShowConfirmation(false), onClose: () => setShowConfirmation(false), intent: 'alert' });
+                setShowConfirmation(true);
+            }, []);
+
+            const showConfirm = useCallback((message, onConfirm) => {
+                setConfirmationDetails({ title: '確認操作', message, onConfirm: () => { setShowConfirmation(false); onConfirm(); }, onClose: () => setShowConfirmation(false), intent: 'confirm' });
+                setShowConfirmation(true);
+            }, []);
+
+            const showCreationSuccessAlert = (title, count) => {
+                showAlert(`會議「${title}」建立成功！\n已匯入 ${count} 位成員。\n\n【系統規則說明】\n1. 會議時間前 30 分鐘開放簽到\n2. 會議結束後 10 分鐘關閉簽到\n3. 會議資料將於會議結束後 6 小時自動刪除\n\n請務必於時限內完成簽到與報表下載備份。`);
+            };
+
+            const handleFileChangeForCreation = (event) => {
+                const file = event.target.files[0];
+                if(!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const result = e.target.result.startsWith('\uFEFF') ? e.target.result.substring(1) : e.target.result;
+                    const lines = result.split('\n');
+                    const members = [];
+                    lines.forEach((l, i) => {
+                        const clean = l.trim();
+                        if(!clean || (i===0 && clean.includes('姓名'))) return;
+                        const parts = clean.match(/(?:[^,"]+|"[^"]*")+/g);
+                        if(parts && parts.length >= 4) {
+                            members.push({ id: parts[0].trim(), name: parts[1].trim(), department: parts[2].trim(), title: parts[3].trim(), phone: parts[4]?.trim()||'', status: 'pending', order: i });
+                        }
+                    });
+                    if(members.length > 0) {
+                        setMeetingForm(p => ({ ...p, members }));
+                        showAlert(`成功匯入 ${members.length} 位成員`);
+                    } else {
+                        showAlert("匯入失敗，請檢查 CSV 格式");
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            };
+
+            useEffect(() => {
+                try {
+                    const app = initializeApp(firebaseConfig);
+                    const auth = getAuth(app);
+                    const firestore = getFirestore(app);
+                    setDb(firestore);
+                    setAuthInstance(auth);
+                    const initAuth = async () => {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined') await signInWithCustomToken(auth, __initial_auth_token);
+                            else await signInAnonymously(auth);
+                        } catch(e) { console.error(e); }
+                    };
+                    onAuthStateChanged(auth, (u) => { setUserId(u ? u.uid : null); setIsAuthReady(true); });
+                    initAuth();
+                } catch(e) { console.error("Init Error", e); }
+            }, []);
+
+            useEffect(() => {
+                if(!isAuthReady || !db || !userId) return;
+                const q = collection(db, `artifacts/${appId}/public/data/meetings`);
+                const unsub = onSnapshot(q, (snap) => {
+                    const now = new Date();
+                    const list = snap.docs.map(d => ({id: d.id, ...d.data()}))
+                        .filter(m => {
+                            const end = parseDateTime(m.date, m.endTime);
+                            return end.getTime() === 0 || now <= new Date(end.getTime() + 6*3600000);
+                        })
+                        .sort((a,b) => parseDateTime(b.date, b.startTime) - parseDateTime(a.date, a.startTime));
+                    setMeetings(list);
+                });
+                return () => unsub();
+            }, [isAuthReady, db, userId]); 
+
+            const openCreateModal = () => {
+                setModalMode('create');
+                const defaults = getNextHourTimes();
+                setMeetingForm({
+                    ...defaultNewMeeting,
+                    date: defaults.date,
+                    startTime: defaults.startTime,
+                    endTime: defaults.endTime
+                });
+                setShowCreateModal(true);
+            };
+
+            const openEditModal = (meeting) => {
+                setModalMode('edit');
+                setEditingId(meeting.id);
+                setMeetingForm({ 
+                    title: meeting.title, 
+                    date: meeting.date, 
+                    startTime: meeting.startTime, 
+                    endTime: meeting.endTime,
+                    members: meeting.members 
+                });
+                setShowCreateModal(true);
+            };
+
+            const handleSaveMeeting = async () => {
+                if(!db || !userId) return showAlert("請稍候再試");
+                if(!meetingForm.title) return showAlert("請輸入會議名稱");
+                
+                try {
+                    if (modalMode === 'create') {
+                        if(meetingForm.members.length === 0) return showAlert("請上傳名單");
+                        await addDoc(collection(db, `artifacts/${appId}/public/data/meetings`), { ...meetingForm, createdAt: new Date().toISOString() });
+                        showCreationSuccessAlert(meetingForm.title, meetingForm.members.length);
+                        setShowCreateModal(false);
+                        setMeetingForm(defaultNewMeeting);
+                    } else {
+                        await updateDoc(doc(db, `artifacts/${appId}/public/data/meetings`, editingId), {
+                            title: meetingForm.title,
+                            date: meetingForm.date,
+                            startTime: meetingForm.startTime,
+                            endTime: meetingForm.endTime,
+                            members: meetingForm.members
+                        });
+                        setShowCreateModal(false);
+                        showAlert("會議資訊更新成功！");
+                    }
+                } catch(e) { 
+                    console.error(e);
+                    showAlert(modalMode === 'create' ? "建立失敗" : "更新失敗"); 
+                }
+            };
+
+            const handleDelete = async (meeting) => {
+                showConfirm(`確定要刪除「${meeting.title}」嗎？`, async () => {
+                    try {
+                        await deleteDoc(doc(db, `artifacts/${appId}/public/data/meetings`, meeting.id));
+                        if(selectedMeetingId === meeting.id) setSelectedMeetingId(null);
+                        showAlert("已刪除");
+                    } catch(e) { showAlert("刪除失敗"); }
+                });
+            };
+
+            const handleAdminAction = (action) => {
+                if(isAdmin) action();
+                else { setPendingAdminAction(() => action); setShowAdminLogin(true); }
+            };
+
+            const handleAdminLoginSuccess = () => { 
+                setIsAdmin(true); 
+                if(pendingAdminAction) { pendingAdminAction(); setPendingAdminAction(null); }
+            };
+
+            if(!isAuthReady) return <div className="flex justify-center items-center h-screen"><Icons.Clock className="animate-spin-slow w-10 h-10 text-blue-600"/></div>;
+
+            if(selectedMeeting) return <MeetingRoom meeting={selectedMeeting} onUpdateMeeting={async (updated) => {
+                if(!db) return;
+                await setDoc(doc(db, `artifacts/${appId}/public/data/meetings`, updated.id), updated, {merge: true});
+            }} onBack={() => setSelectedMeetingId(null)} isAdmin={isAdmin} onAdminAuth={handleAdminAction} db={db} />;
+
+            return (
+                <div className="min-h-screen bg-slate-50 p-4">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="flex justify-between items-center mb-6">
+                            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2"><Icons.Globe /> 臺大醫院會議簽到系統</h1>
+                            <div className="flex gap-2">
+                                {isAdmin ? <button onClick={() => { setIsAdmin(false); showAlert("已登出"); }} className="bg-red-600 text-white px-3 py-1 rounded">登出管理員</button> : <button onClick={() => setShowAdminLogin(true)} className="bg-slate-700 text-white px-3 py-1 rounded">管理員登入</button>}
+                            </div>
+                        </div>
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold">會議列表</h2>
+                            <button onClick={() => handleAdminAction(openCreateModal)} className="bg-blue-600 text-white px-4 py-2 rounded shadow flex items-center gap-2"><Icons.Plus size={18}/> 建立新會議</button>
+                        </div>
+                        <div className="space-y-4">
+                            {meetings.length === 0 ? <div className="text-center p-10 text-gray-400 border border-dashed rounded bg-white">暫無會議</div> : meetings.map(m => (
+                                <div key={m.id} className="bg-white p-5 rounded shadow flex justify-between items-center group relative overflow-hidden border-l-4 border-blue-600 hover:shadow-lg transition-all">
+                                    <div className="flex-1">
+                                        <h3 className="text-lg font-bold text-gray-800">{m.title}</h3>
+                                        <div className="text-sm text-gray-500 flex items-center gap-2 mt-1"><Icons.Calendar size={14}/> {m.date} {m.startTime}-{m.endTime}</div>
+                                        <div className="text-sm mt-2 text-gray-600 flex gap-4">
+                                            <span>總人數: {m.members?.length || 0}</span>
+                                            <span className="text-green-600">已簽: {m.members?.filter(x=>x.status!=='pending').length||0}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => setSelectedMeetingId(m.id)} className="bg-blue-600 text-white px-4 py-2 rounded font-bold flex items-center gap-1 hover:bg-blue-700 transition-colors">進入 <Icons.ChevronRight size={16}/></button>
+                                        
+                                        {/* Admin Controls */}
+                                        {isAdmin && (
+                                            <div className="flex gap-1 ml-2 border-l pl-2">
+                                                <button onClick={() => openEditModal(m)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="編輯會議"><Icons.Edit size={18}/></button>
+                                                <button onClick={() => handleDelete(m)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="刪除會議"><Icons.Trash2 size={18}/></button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {showCreateModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+                                <div className="bg-blue-800 p-4 text-white flex justify-between items-center shrink-0">
+                                    <h3 className="font-bold text-lg flex items-center gap-2">
+                                        {modalMode === 'create' ? <><Icons.Plus size={20}/> 建立新會議</> : <><Icons.Edit size={20}/> 編輯會議</>}
+                                    </h3>
+                                    <button onClick={() => setShowCreateModal(false)}><Icons.X size={20}/></button>
+                                </div>
+                                <div className="p-6 overflow-y-auto">
+                                    <div className="mb-4">
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">會議名稱</label>
+                                        <input type="text" className="w-full border p-2 rounded focus:ring-2 ring-blue-500 outline-none" value={meetingForm.title} onChange={e => setMeetingForm({...meetingForm, title: e.target.value})} />
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-3 mb-4">
+                                        <div><label className="text-xs text-gray-500">日期</label><input type="date" className="w-full border p-2 rounded" value={meetingForm.date} onChange={e => setMeetingForm({...meetingForm, date: e.target.value})} /></div>
+                                        <div><label className="text-xs text-gray-500">開始</label><input type="time" className="w-full border p-2 rounded" value={meetingForm.startTime} onChange={e => setMeetingForm({...meetingForm, startTime: e.target.value})} /></div>
+                                        <div><label className="text-xs text-gray-500">結束</label><input type="time" className="w-full border p-2 rounded" value={meetingForm.endTime} onChange={e => setMeetingForm({...meetingForm, endTime: e.target.value})} /></div>
+                                    </div>
+                                    
+                                    <div className="border-t pt-4 bg-gray-50 -mx-6 px-6 pb-2">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <p className="font-bold text-gray-700 flex items-center gap-2"><Icons.Users size={16}/> 成員名單 ({meetingForm.members.length}人)</p>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => createFileInputRef.current.click()} className="bg-white border px-3 py-1 rounded text-sm hover:bg-gray-100 transition-colors">
+                                                    {modalMode === 'create' ? '上傳名單' : '更新名單'}
+                                                </button>
+                                                <button onClick={downloadSampleCSV} className="text-blue-600 text-xs underline hover:text-blue-800">範例下載</button>
+                                            </div>
+                                        </div>
+                                        <input type="file" ref={createFileInputRef} className="hidden" accept=".csv" onChange={handleFileChangeForCreation} />
+                                        {modalMode === 'edit' && <p className="text-xs text-gray-500">注意：編輯模式下重新上傳名單將會覆蓋現有名單。</p>}
+                                    </div>
+                                </div>
+                                <div className="flex justify-end gap-3 p-4 border-t shrink-0">
+                                    <button onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">取消</button>
+                                    <button onClick={handleSaveMeeting} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold shadow">
+                                        {modalMode === 'create' ? '立即建立' : '儲存變更'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <AdminLoginModal isOpen={showAdminLogin} onClose={() => setShowAdminLogin(false)} onLoginSuccess={handleAdminLoginSuccess} />
+                    <ConfirmationModal isOpen={showConfirmation} onClose={() => setShowConfirmation(false)} {...confirmationDetails} />
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
