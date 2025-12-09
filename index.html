@@ -14,7 +14,7 @@
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Firebase Compat SDK (更穩定的單檔載入方式) -->
+    <!-- Firebase Compat SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -24,35 +24,33 @@
         body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
         .animate-spin-slow { animation: spin 3s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900 h-screen flex flex-col">
     
-    <!-- 錯誤提示層：若 React 崩潰會顯示 -->
-    <div id="error-layer" style="display:none;" class="fixed inset-0 bg-white z-[9999] flex-col items-center justify-center p-4">
-        <div class="text-red-600 font-bold text-xl mb-2">系統發生錯誤</div>
-        <div id="error-msg" class="text-gray-600 text-sm border p-2 rounded bg-gray-50 w-full max-w-md break-all"></div>
-        <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded">重新整理</button>
+    <!-- 設定缺失警告層 -->
+    <div id="config-warning" class="fixed inset-0 bg-gray-900 bg-opacity-90 z-[9999] hidden flex-col items-center justify-center text-white p-8 text-center">
+        <div class="text-6xl mb-4">⚠️</div>
+        <h2 class="text-3xl font-bold mb-4">尚未設定 Firebase</h2>
+        <p class="text-lg mb-6 max-w-md leading-relaxed">
+            系統偵測到您尚未填入資料庫連線設定。<br/><br/>
+            請用<b>「記事本」</b>或<b>「程式編輯器」</b>打開此 index.html 檔案，
+            找到 <code>// ★★★ 請在此處貼上...</code> 的位置，並貼上您剛剛複製的設定碼。
+        </p>
+        <button onclick="location.reload()" class="px-6 py-3 bg-blue-600 rounded-lg font-bold hover:bg-blue-700 transition">我已設定完成，重新整理</button>
     </div>
 
     <div id="root" class="flex-1 flex flex-col h-full"></div>
 
-    <script>
-        // 全域錯誤攔截
-        window.onerror = function(msg, url, line, col, error) {
-            document.getElementById('error-layer').style.display = 'flex';
-            document.getElementById('error-msg').innerText = msg + '\nLine: ' + line;
-            return false;
-        };
-    </script>
-
     <script type="text/babel">
         const { useState, useRef, useEffect, useMemo, useCallback } = React;
 
-        // --- Configuration ---
+        // ============================================================================
+        // ★★★ 請在此處貼上 Firebase 設定 (從這裡開始修改) ★★★
+        // ============================================================================
+        
         const firebaseConfig = {
   apiKey: "AIzaSyBj3jB2ygkrfCccGWk8AZGwQgd7ZjdCul0",
   authDomain: "ntuh-meeting-app2026.firebaseapp.com",
@@ -63,16 +61,26 @@
   measurementId: "G-FR3Y2PY4BZ"
 };
 const appId = firebaseConfig.appId;
-        // ★★★ 結束設定區塊 ★★★
 
-        // 初始化 Firebase (Compat Mode)
+        // ============================================================================
+        // ★★★ 設定區塊結束 (下方程式碼不需要修改) ★★★
+        // ============================================================================
+
+        // 檢查設定是否存在
+        if (!firebaseConfig.apiKey) {
+            document.getElementById('config-warning').style.display = 'flex';
+        }
+
+        // 初始化 Firebase
         let db, auth;
+        const appId = firebaseConfig.appId || 'default-app-id'; // 自動抓取 ID
+
         try {
-            if (!firebase.apps.length) {
+            if (firebaseConfig.apiKey && !firebase.apps.length) {
                 firebase.initializeApp(firebaseConfig);
+                db = firebase.firestore();
+                auth = firebase.auth();
             }
-            db = firebase.firestore();
-            auth = firebase.auth();
         } catch (e) {
             console.error("Firebase Init Error:", e);
         }
@@ -86,11 +94,9 @@ const appId = firebaseConfig.appId;
             members: [],
         };
 
-        // --- Icons (Inline SVGs) ---
+        // --- Icons ---
         const Icon = ({ path, className = "", size = 24, ...props }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
-                {path}
-            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{path}</svg>
         );
         const Icons = {
             UserCheck: (props) => <Icon path={<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></>} {...props} />,
@@ -239,26 +245,18 @@ const appId = firebaseConfig.appId;
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, width, height);
 
-                // Watermark settings
                 ctx.save();
                 ctx.font = "12px 'Noto Sans TC', sans-serif";
                 ctx.fillStyle = "rgba(180, 195, 210, 0.25)"; 
                 ctx.textBaseline = "middle";
                 
-                const year = timestamp.getFullYear();
-                const month = String(timestamp.getMonth() + 1).padStart(2, '0');
-                const day = String(timestamp.getDate()).padStart(2, '0');
-                const hour = String(timestamp.getHours()).padStart(2, '0');
-                const minute = String(timestamp.getMinutes()).padStart(2, '0');
-                const timeStr = `${year}年${month}月${day}日${hour}時${minute}分`;
-
+                const timeStr = timestamp.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
                 const titleText = meetingTitle || '';
-                // 緊密連接的字串，沒有空格
                 const watermarkText = `臺大醫院會議簽到管理系統${titleText}${timeStr}`;
                 const textWidth = ctx.measureText(watermarkText).width + 20;
 
                 const diag = Math.ceil(Math.sqrt(width * width + height * height));
-                const stepY = 22;  // Dense vertical step (approx 0.5 line height visual)
+                const stepY = 22;
 
                 ctx.translate(width / 2, height / 2);
                 ctx.rotate(-45 * Math.PI / 180);
@@ -272,37 +270,28 @@ const appId = firebaseConfig.appId;
                     }
                 }
                 ctx.restore();
-
-                // Signature Line Style (Black, 50% opacity)
+                
                 ctx.lineWidth = 3;
                 ctx.lineCap = 'round';
-                ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)'; 
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
             }, [timestamp, meetingTitle]);
 
             useEffect(() => {
                 const canvas = canvasRef.current;
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
-                
                 const setCanvasSize = () => {
                     const parent = canvas.parentElement;
                     if (!parent) return;
                     canvas.width = parent.clientWidth;
                     canvas.height = parent.clientHeight;
-                    
                     drawBackground(ctx, canvas.width, canvas.height);
                     if (hasSignature) setHasSignature(false);
                 };
-
                 setCanvasSize();
-                // Delay to ensure modal animation done
                 const timer = setTimeout(setCanvasSize, 100);
-
                 window.addEventListener('resize', setCanvasSize);
-                return () => {
-                    window.removeEventListener('resize', setCanvasSize);
-                    clearTimeout(timer);
-                };
+                return () => { window.removeEventListener('resize', setCanvasSize); clearTimeout(timer); };
             }, [drawBackground]);
 
             const getPos = (e) => {
@@ -344,10 +333,7 @@ const appId = firebaseConfig.appId;
             };
 
             const handleSave = () => {
-                if (!hasSignature) {
-                    setMessage("請先進行簽名");
-                    return;
-                }
+                if (!hasSignature) { setMessage("請先進行簽名"); return; }
                 const canvas = canvasRef.current;
                 onSave(canvas.toDataURL('image/png'));
             };
@@ -381,7 +367,7 @@ const appId = firebaseConfig.appId;
             );
         }
 
-        // --- MeetingRoom (Main Detail Component) ---
+        // --- MeetingRoom ---
         function MeetingRoom({ meeting, onUpdateMeeting, onBack, isAdmin, onAdminAuth, db }) {
             const [view, setView] = useState('home');
             const [searchQuery, setSearchQuery] = useState('');
@@ -416,7 +402,7 @@ const appId = firebaseConfig.appId;
                 setRoomConfirmationDetails({ title: '通知', message, onConfirm: () => setShowRoomConfirmation(false), onClose: () => setShowRoomConfirmation(false), intent: 'alert' });
                 setShowRoomConfirmation(true);
             }, []);
-
+            
             const showConfirm = useCallback((message, onConfirmCallback) => {
                 setRoomConfirmationDetails({ title: '確認操作', message, onConfirm: () => { setShowRoomConfirmation(false); onConfirmCallback(); }, onClose: () => setShowRoomConfirmation(false), intent: 'confirm' });
                 setShowRoomConfirmation(true);
@@ -673,7 +659,6 @@ const appId = firebaseConfig.appId;
                                 </div>
                             </div>
                         )}
-
                         {showSignaturePad && selectedMember && (
                             <SignaturePad onSave={handleSignatureSave} onCancel={() => { setShowSignaturePad(false); setSelectedMember(null); }} headerMessage={signatureHeaderMessage} meetingTitle={meeting.title} />
                         )}
@@ -685,7 +670,6 @@ const appId = firebaseConfig.appId;
         }
 
         // --- App Component (Top Level) ---
-        // ... (App component logic remains same, just ensuring correct state management for modals/data)
         function App() {
             const [db, setDb] = useState(null);
             const [meetings, setMeetings] = useState([]);
@@ -747,7 +731,7 @@ const appId = firebaseConfig.appId;
                      setMeetings(list);
                 }, err => console.error(err));
                 return () => unsub();
-            }, [isAuthReady, db]); // Removed userId to avoid re-subscription loop if auth state flickers, firestore handles auth internally
+            }, [isAuthReady, db]);
 
              // Initial Auth Check
              useEffect(() => {
